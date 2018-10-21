@@ -9,7 +9,12 @@
 #include <boost/bind.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/tokenizer.hpp>
+
+#if __has_include("json/json.h")
 #include <json/json.h>
+#elif __has_include("jsoncpp/json/json.h")
+#include <jsoncpp/json/json.h>
+#endif
 
 extern "C" {
 #include <pwd.h>
@@ -24,6 +29,8 @@ namespace zmq = opentxs::network::zeromq;
 #define API_ARG_VERSION 1
 #define CREATE_NYM_VERSION 1
 #define CREATE_UNITDEFINITION_VERSION 1
+#define GETWORKFLOW_VERSION 1
+#define HDSEED_VERSION 1
 #define MOVEFUNDS_VERSION 1
 #define RPC_COMMAND_VERSION 1
 #define SENDPAYMENT_VERSION 1
@@ -31,7 +38,7 @@ namespace zmq = opentxs::network::zeromq;
 namespace opentxs::otctl
 {
 const std::map<std::string, proto::RPCCommandType> CLI::commands_{
-    {"acceptpendingpayments", proto::RPCCOMMAND_ACCEPTPENDINGPAYMENTS},
+    {"acceptpendingpayment", proto::RPCCOMMAND_ACCEPTPENDINGPAYMENTS},
     {"addclient", proto::RPCCOMMAND_ADDCLIENTSESSION},
     {"addcontact", proto::RPCCOMMAND_ADDCONTACT},
     {"addserver", proto::RPCCOMMAND_ADDSERVERSESSION},
@@ -42,20 +49,26 @@ const std::map<std::string, proto::RPCCommandType> CLI::commands_{
     {"getaccountactivity", proto::RPCCOMMAND_GETACCOUNTACTIVITY},
     {"getaccountbalance", proto::RPCCOMMAND_GETACCOUNTBALANCE},
     {"getcompatibleaccounts", proto::RPCCOMMAND_GETCOMPATIBLEACCOUNTS},
+    {"getnym", proto::RPCCOMMAND_GETNYM},
     {"getpendingpayments", proto::RPCCOMMAND_GETPENDINGPAYMENTS},
+    {"getseed", proto::RPCCOMMAND_GETHDSEED},
     {"getserver", proto::RPCCOMMAND_GETSERVERCONTRACT},
+    {"getworkflow", proto::RPCCOMMAND_GETWORKFLOW},
+    {"importseed", proto::RPCCOMMAND_IMPORTHDSEED},
     {"importserver", proto::RPCCOMMAND_IMPORTSERVERCONTRACT},
     {"issueunitdefinition", proto::RPCCOMMAND_ISSUEUNITDEFINITION},
     {"listaccounts", proto::RPCCOMMAND_LISTACCOUNTS},
     {"listclientsessions", proto::RPCCOMMAND_LISTCLIENTSESSIONS},
     {"listcontacts", proto::RPCCOMMAND_LISTCONTACTS},
     {"listnyms", proto::RPCCOMMAND_LISTNYMS},
+    {"listseeds", proto::RPCCOMMAND_LISTHDSEEDS},
     {"listservers", proto::RPCCOMMAND_LISTSERVERCONTRACTS},
     {"listserversessions", proto::RPCCOMMAND_LISTSERVERSESSIONS},
     {"listunitdefinitions", proto::RPCCOMMAND_LISTUNITDEFINITIONS},
     {"movefunds", proto::RPCCOMMAND_MOVEFUNDS},
     {"registernym", proto::RPCCOMMAND_REGISTERNYM},
     {"sendcheque", proto::RPCCOMMAND_SENDPAYMENT},
+    {"transfer", proto::RPCCOMMAND_SENDPAYMENT},
 };
 const std::map<proto::RPCPushType, CLI::PushHandler> CLI::push_handlers_{
     {proto::RPCPUSH_ACCOUNT, &CLI::account_event_push},
@@ -64,7 +77,7 @@ const std::map<proto::RPCPushType, CLI::PushHandler> CLI::push_handlers_{
 const std::map<proto::RPCCommandType, CLI::ResponseHandler>
     CLI::response_handlers_{
         {proto::RPCCOMMAND_ACCEPTPENDINGPAYMENTS,
-         &CLI::accept_pending_payments_response},
+         &CLI::accept_pending_payment_response},
         {proto::RPCCOMMAND_ADDCLIENTSESSION, &CLI::add_session_response},
         {proto::RPCCOMMAND_ADDCONTACT, &CLI::add_contact_response},
         {proto::RPCCOMMAND_ADDSERVERSESSION, &CLI::add_session_response},
@@ -80,10 +93,14 @@ const std::map<proto::RPCCommandType, CLI::ResponseHandler>
          &CLI::get_account_balance_response},
         {proto::RPCCOMMAND_GETCOMPATIBLEACCOUNTS,
          &CLI::get_compatible_accounts_response},
+        {proto::RPCCOMMAND_GETNYM, &CLI::get_nym_response},
         {proto::RPCCOMMAND_GETPENDINGPAYMENTS,
          &CLI::get_pending_payments_response},
+        {proto::RPCCOMMAND_GETHDSEED, &CLI::get_seed_response},
         {proto::RPCCOMMAND_GETSERVERCONTRACT,
          &CLI::get_server_contract_response},
+        {proto::RPCCOMMAND_GETWORKFLOW, &CLI::get_workflow_response},
+        {proto::RPCCOMMAND_IMPORTHDSEED, &CLI::import_seed_response},
         {proto::RPCCOMMAND_IMPORTSERVERCONTRACT,
          &CLI::import_server_contract_response},
         {proto::RPCCOMMAND_ISSUEUNITDEFINITION,
@@ -92,6 +109,7 @@ const std::map<proto::RPCCommandType, CLI::ResponseHandler>
         {proto::RPCCOMMAND_LISTCLIENTSESSIONS, &CLI::list_session_response},
         {proto::RPCCOMMAND_LISTCONTACTS, &CLI::list_contacts_response},
         {proto::RPCCOMMAND_LISTNYMS, &CLI::list_nyms_response},
+        {proto::RPCCOMMAND_LISTHDSEEDS, &CLI::list_seeds_response},
         {proto::RPCCOMMAND_LISTSERVERCONTRACTS, &CLI::list_servers_response},
         {proto::RPCCOMMAND_LISTSERVERSESSIONS, &CLI::list_session_response},
         {proto::RPCCOMMAND_LISTUNITDEFINITIONS,
@@ -101,7 +119,7 @@ const std::map<proto::RPCCommandType, CLI::ResponseHandler>
         {proto::RPCCOMMAND_SENDPAYMENT, &CLI::send_payment_response},
     };
 const std::map<proto::RPCCommandType, CLI::Processor> CLI::processors_{
-    {proto::RPCCOMMAND_ACCEPTPENDINGPAYMENTS, &CLI::accept_pending_payments},
+    {proto::RPCCOMMAND_ACCEPTPENDINGPAYMENTS, &CLI::accept_pending_payment},
     {proto::RPCCOMMAND_ADDCLIENTSESSION, &CLI::add_client_session},
     {proto::RPCCOMMAND_ADDCONTACT, &CLI::add_contact},
     {proto::RPCCOMMAND_ADDSERVERSESSION, &CLI::add_server_session},
@@ -113,20 +131,25 @@ const std::map<proto::RPCCommandType, CLI::Processor> CLI::processors_{
     {proto::RPCCOMMAND_GETACCOUNTACTIVITY, &CLI::get_account_activity},
     {proto::RPCCOMMAND_GETACCOUNTBALANCE, &CLI::get_account_balance},
     {proto::RPCCOMMAND_GETCOMPATIBLEACCOUNTS, &CLI::get_compatible_accounts},
+    {proto::RPCCOMMAND_GETNYM, &CLI::get_nym},
     {proto::RPCCOMMAND_GETPENDINGPAYMENTS, &CLI::get_pending_payments},
+    {proto::RPCCOMMAND_GETHDSEED, &CLI::get_seed},
     {proto::RPCCOMMAND_GETSERVERCONTRACT, &CLI::get_server_contract},
     {proto::RPCCOMMAND_IMPORTSERVERCONTRACT, &CLI::import_server_contract},
+    {proto::RPCCOMMAND_IMPORTHDSEED, &CLI::import_seed},
     {proto::RPCCOMMAND_ISSUEUNITDEFINITION, &CLI::issue_unit_definition},
     {proto::RPCCOMMAND_LISTACCOUNTS, &CLI::list_accounts},
     {proto::RPCCOMMAND_LISTCLIENTSESSIONS, &CLI::list_client_sessions},
     {proto::RPCCOMMAND_LISTCONTACTS, &CLI::list_contacts},
     {proto::RPCCOMMAND_LISTNYMS, &CLI::list_nyms},
+    {proto::RPCCOMMAND_LISTHDSEEDS, &CLI::list_seeds},
     {proto::RPCCOMMAND_LISTSERVERCONTRACTS, &CLI::list_server_contracts},
     {proto::RPCCOMMAND_LISTSERVERSESSIONS, &CLI::list_server_sessions},
     {proto::RPCCOMMAND_LISTUNITDEFINITIONS, &CLI::list_unit_definitions},
     {proto::RPCCOMMAND_MOVEFUNDS, &CLI::move_funds},
     {proto::RPCCOMMAND_REGISTERNYM, &CLI::register_nym},
     {proto::RPCCOMMAND_SENDPAYMENT, &CLI::send_payment},
+    {proto::RPCCOMMAND_GETWORKFLOW, &CLI::get_workflow},
 };
 
 const std::map<proto::RPCCommandType, std::string> CLI::command_names_{
@@ -168,6 +191,7 @@ const std::map<proto::RPCCommandType, std::string> CLI::command_names_{
     {proto::RPCCOMMAND_ACCEPTPENDINGPAYMENTS, "ACCEPTPENDINGPAYMENTS"},
     {proto::RPCCOMMAND_CREATECOMPATIBLEACCOUNT, "CREATECOMPATIBLEACCOUNT"},
     {proto::RPCCOMMAND_GETCOMPATIBLEACCOUNTS, "GETCOMPATIBLEACCOUNTS"},
+    {proto::RPCCOMMAND_GETWORKFLOW, "GETWORKFLOW"},
 };
 
 const std::map<proto::RPCResponseCode, std::string> CLI::status_names_{
@@ -222,7 +246,7 @@ void CLI::account_event_push(const proto::RPCPush& in)
     LogOutput("   Memo: ")(event.memo()).Flush();
 }
 
-void CLI::accept_pending_payments(
+void CLI::accept_pending_payment(
     const std::string& in,
     const zmq::DealerSocket& socket)
 {
@@ -283,7 +307,7 @@ void CLI::accept_pending_payments(
     OT_ASSERT(sent);
 }
 
-void CLI::accept_pending_payments_response(const proto::RPCResponse& in)
+void CLI::accept_pending_payment_response(const proto::RPCResponse& in)
 {
     print_basic_info(in);
 
@@ -338,7 +362,7 @@ void CLI::add_contact(const std::string& in, const zmq::DealerSocket& socket)
     }
 
     if (label.empty()) {
-        LogOutput(__FUNCTION__)(": Missing label account option").Flush();
+        LogOutput(__FUNCTION__)(": Missing label option").Flush();
 
         return;
     }
@@ -1035,6 +1059,65 @@ std::string CLI::get_account_push_name(const proto::AccountEventType type)
     }
 }
 
+void CLI::get_nym(const std::string& in, const zmq::DealerSocket& socket)
+{
+    int instance{-1};
+    std::string ownerID{""};
+
+    po::options_description options("Options");
+    options.add_options()("instance", po::value<int>(&instance), "<number>");
+    options.add_options()(
+        "owner", po::value<std::string>(&ownerID), "<string>");
+    auto hasOptions = parse_command(in, options);
+
+    if (!hasOptions) {
+        print_options_description(options);
+        return;
+    }
+
+    if (-1 == instance) {
+        LogOutput(__FUNCTION__)(": Missing instance option").Flush();
+
+        return;
+    }
+
+    if (ownerID.empty()) {
+        LogOutput(__FUNCTION__)(": Missing owner id option").Flush();
+
+        return;
+    }
+
+    proto::RPCCommand out{};
+    out.set_version(RPC_COMMAND_VERSION);
+    out.set_cookie(Identifier::Random()->str());
+    out.set_type(proto::RPCCOMMAND_GETNYM);
+    out.set_session(instance);
+    out.add_identifier(ownerID);
+    const auto valid = proto::Validate(out, VERBOSE);
+
+    OT_ASSERT(valid);
+
+    const auto sent = send_message(socket, out);
+
+    OT_ASSERT(sent);
+}
+
+void CLI::get_nym_response(const proto::RPCResponse& in)
+{
+    print_basic_info(in);
+
+    for (const auto& credentialindex : in.nym()) {
+        LogOutput("   Nym ID: ")(credentialindex.nymid()).Flush();
+        LogOutput("   Revision: ")(credentialindex.revision()).Flush();
+        LogOutput("   Active Credential Count: ")(
+            credentialindex.activecredentials_size())
+            .Flush();
+        LogOutput("   Revoked Credential Count: ")(
+            credentialindex.revokedcredentials_size())
+            .Flush();
+    }
+}
+
 void CLI::get_pending_payments(
     const std::string& in,
     const zmq::DealerSocket& socket)
@@ -1060,7 +1143,7 @@ void CLI::get_pending_payments(
     }
 
     if (ownerID.empty()) {
-        LogOutput(__FUNCTION__)(": Missing server id option").Flush();
+        LogOutput(__FUNCTION__)(": Missing owner id option").Flush();
 
         return;
     }
@@ -1093,6 +1176,59 @@ void CLI::get_pending_payments_response(const proto::RPCResponse& in)
         LogOutput("   Contact ID: ")(accountevent.contact()).Flush();
         LogOutput("   Workflow ID: ")(accountevent.workflow()).Flush();
         LogOutput("   Pending Amount: ")(accountevent.pendingamount()).Flush();
+    }
+}
+
+void CLI::get_seed(const std::string& in, const zmq::DealerSocket& socket)
+{
+    int instance{-1};
+    std::string seedID{""};
+
+    po::options_description options("Options");
+    options.add_options()("instance", po::value<int>(&instance), "<number>");
+    options.add_options()("seed", po::value<std::string>(&seedID), "<string>");
+    auto hasOptions = parse_command(in, options);
+
+    if (!hasOptions) {
+        print_options_description(options);
+        return;
+    }
+
+    if (-1 == instance) {
+        LogOutput(__FUNCTION__)(": Missing instance option").Flush();
+
+        return;
+    }
+
+    if (seedID.empty()) {
+        LogOutput(__FUNCTION__)(": Missing seed id option").Flush();
+
+        return;
+    }
+
+    proto::RPCCommand out{};
+    out.set_version(RPC_COMMAND_VERSION);
+    out.set_cookie(Identifier::Random()->str());
+    out.set_type(proto::RPCCOMMAND_GETHDSEED);
+    out.set_session(instance);
+    out.add_identifier(seedID);
+    const auto valid = proto::Validate(out, VERBOSE);
+
+    OT_ASSERT(valid);
+
+    const auto sent = send_message(socket, out);
+
+    OT_ASSERT(sent);
+}
+
+void CLI::get_seed_response(const proto::RPCResponse& in)
+{
+    print_basic_info(in);
+
+    for (const auto& seed : in.seed()) {
+        LogOutput("   Seed ID: ")(seed.id()).Flush();
+        LogOutput("   Seed Words: ")(seed.words()).Flush();
+        LogOutput("   Seed Passphrase: ")(seed.passphrase()).Flush();
     }
 }
 
@@ -1198,12 +1334,185 @@ std::string CLI::get_status_name(const proto::RPCResponseCode code)
     }
 }
 
+void CLI::get_workflow(const std::string& in, const zmq::DealerSocket& socket)
+{
+    int instance{-1};
+    std::string nymID{""};
+    std::string workflowID{""};
+
+    po::options_description options("Options");
+    options.add_options()("instance", po::value<int>(&instance), "<number>");
+    options.add_options()("nym", po::value<std::string>(&nymID), "<string>");
+    options.add_options()(
+        "workflow", po::value<std::string>(&workflowID), "<string>");
+    auto hasOptions = parse_command(in, options);
+
+    if (!hasOptions) {
+        print_options_description(options);
+        return;
+    }
+
+    if (-1 == instance) {
+        LogOutput(__FUNCTION__)(": Missing instance option").Flush();
+
+        return;
+    }
+
+    if (nymID.empty()) {
+        LogOutput(__FUNCTION__)(": Missing nym id option").Flush();
+
+        return;
+    }
+
+    if (workflowID.empty()) {
+        LogOutput(__FUNCTION__)(": Missing workflow id option").Flush();
+
+        return;
+    }
+
+    proto::RPCCommand out{};
+    out.set_version(RPC_COMMAND_VERSION);
+    out.set_cookie(Identifier::Random()->str());
+    out.set_type(proto::RPCCOMMAND_GETWORKFLOW);
+    out.set_session(instance);
+    auto& getworkflow = *out.add_getworkflow();
+    getworkflow.set_version(GETWORKFLOW_VERSION);
+    getworkflow.set_nymid(nymID);
+    getworkflow.set_workflowid(workflowID);
+    const auto valid = proto::Validate(out, VERBOSE);
+
+    OT_ASSERT(valid);
+
+    const auto sent = send_message(socket, out);
+
+    OT_ASSERT(sent);
+}
+
+void CLI::get_workflow_response(const proto::RPCResponse& in)
+{
+    print_basic_info(in);
+
+    for (const auto& workflow : in.workflow()) {
+        LogOutput(__FUNCTION__)(": Version ")(workflow.version())(" workflow")
+            .Flush();
+        LogOutput(__FUNCTION__)(": * ID: ")(workflow.id()).Flush();
+        LogOutput(__FUNCTION__)(": * Type: ")(workflow.type()).Flush();
+        LogOutput(__FUNCTION__)(": * State: ")(workflow.state()).Flush();
+
+        for (const auto& source : workflow.source()) {
+            LogOutput(__FUNCTION__)(": * Source version: ")(source.version())
+                .Flush();
+            LogOutput(__FUNCTION__)(":   * id: ")(source.id()).Flush();
+            LogOutput(__FUNCTION__)(":   * revision: ")(source.revision())
+                .Flush();
+            LogOutput(__FUNCTION__)(":   * item: ").Flush();
+            LogOutput(source.item()).Flush();
+        }
+
+        LogOutput(__FUNCTION__)(": * Notary: ")(workflow.notary()).Flush();
+
+        for (const auto& party : workflow.party()) {
+            LogOutput(__FUNCTION__)(": * Party nym id: ")(party).Flush();
+        }
+
+        for (const auto& unit : workflow.unit()) {
+            LogOutput(__FUNCTION__)(": * Unit definition id: ")(unit).Flush();
+        }
+
+        for (const auto& account : workflow.account()) {
+            LogOutput(__FUNCTION__)(": * Account id: ")(account).Flush();
+        }
+
+        for (const auto& event : workflow.event()) {
+            LogOutput(__FUNCTION__)(": * Event version: ")(event.version())
+                .Flush();
+            LogOutput(__FUNCTION__)(":   * type: ")(event.type()).Flush();
+
+            for (const auto& item : event.item()) {
+                LogOutput(__FUNCTION__)(":   * item: ").Flush();
+                LogOutput(item).Flush();
+            }
+
+            LogOutput(__FUNCTION__)(":   * timestamp: ")(event.time()).Flush();
+            LogOutput(__FUNCTION__)(":   * method: ")(event.method()).Flush();
+            LogOutput(__FUNCTION__)(":   * transport: ")(event.transport())
+                .Flush();
+            LogOutput(__FUNCTION__)(":   * nym: ")(event.nym()).Flush();
+            LogOutput(__FUNCTION__)(":   * success: ")(
+                (event.success() ? "true" : "false"))
+                .Flush();
+            LogOutput(__FUNCTION__)(":   * memo: ")(event.memo()).Flush();
+        }
+
+        LogOutput(__FUNCTION__)(": * Archived: ")(
+            (workflow.archived() ? "true" : "false"))
+            .Flush();
+    }
+}
+
+void CLI::import_seed(const std::string& in, const zmq::DealerSocket& socket)
+{
+    int instance{-1};
+    std::string words{""};
+    std::string passphrase{""};
+
+    po::options_description options("Options");
+    options.add_options()("instance", po::value<int>(&instance), "<number>");
+    options.add_options()("words", po::value<std::string>(&words), "<string>");
+    options.add_options()(
+        "passphrase", po::value<std::string>(&passphrase), "<string>");
+    auto hasOptions = parse_command(in, options);
+
+    if (!hasOptions) {
+        print_options_description(options);
+        return;
+    }
+
+    if (-1 == instance) {
+        LogOutput(__FUNCTION__)(": Missing instance option").Flush();
+
+        return;
+    }
+
+    if (words.empty()) {
+        LogOutput(__FUNCTION__)(": Missing words option").Flush();
+
+        return;
+    }
+
+    proto::RPCCommand command{};
+    command.set_version(RPC_COMMAND_VERSION);
+    command.set_cookie(Identifier::Random()->str());
+    command.set_type(proto::RPCCOMMAND_IMPORTHDSEED);
+    command.set_session(instance);
+    auto& seed = *command.mutable_hdseed();
+    seed.set_version(HDSEED_VERSION);
+    seed.set_words(words);
+    seed.set_passphrase(passphrase);
+
+    const auto valid = proto::Validate(command, VERBOSE);
+
+    OT_ASSERT(valid);
+
+    const auto sent = send_message(socket, command);
+
+    OT_ASSERT(sent);
+}
+
+void CLI::import_seed_response(const proto::RPCResponse& in)
+{
+    print_basic_info(in);
+
+    for (const auto& id : in.identifier()) {
+        LogOutput("   Seed ID: ")(id).Flush();
+    }
+}
+
 void CLI::import_server_contract(
     const std::string& in,
     const zmq::DealerSocket& socket)
 {
     int instance{-1};
-    std::string server_contract{""};
 
     po::options_description options("Options");
     options.add_options()("instance", po::value<int>(&instance), "<number>");
@@ -1469,6 +1778,48 @@ void CLI::list_nyms_response(const proto::RPCResponse& in)
 
     for (const auto& id : in.identifier()) {
         LogOutput("   Nym ID: ")(id).Flush();
+    }
+}
+
+void CLI::list_seeds(const std::string& in, const zmq::DealerSocket& socket)
+{
+    int instance{-1};
+
+    po::options_description options("Options");
+    options.add_options()("instance", po::value<int>(&instance), "<number>");
+    auto hasOptions = parse_command(in, options);
+
+    if (!hasOptions) {
+        print_options_description(options);
+        return;
+    }
+
+    if (-1 == instance) {
+        LogOutput(__FUNCTION__)(": Missing instance option").Flush();
+
+        return;
+    }
+
+    proto::RPCCommand out{};
+    out.set_version(RPC_COMMAND_VERSION);
+    out.set_cookie(Identifier::Random()->str());
+    out.set_type(proto::RPCCOMMAND_LISTHDSEEDS);
+    out.set_session(instance);
+    const auto valid = proto::Validate(out, VERBOSE);
+
+    OT_ASSERT(valid);
+
+    const auto sent = send_message(socket, out);
+
+    OT_ASSERT(sent);
+}
+
+void CLI::list_seeds_response(const proto::RPCResponse& in)
+{
+    print_basic_info(in);
+
+    for (const auto& id : in.identifier()) {
+        LogOutput("   Seed ID: ")(id).Flush();
     }
 }
 
@@ -1852,7 +2203,7 @@ bool CLI::send_message(
 
 // Invokes RPCCOMMAND_SENDPAYMENT for transaction type RPCPAYMENTTYPE_CHEQUE
 // only.
-void CLI::send_payment(const std::string& in, const zmq::DealerSocket& socket)
+void CLI::send_cheque(const std::string& in, const zmq::DealerSocket& socket)
 {
     int instance{-1};
     std::string contactID{""};
@@ -1922,6 +2273,16 @@ void CLI::send_payment(const std::string& in, const zmq::DealerSocket& socket)
     OT_ASSERT(sent);
 }
 
+void CLI::send_payment(const std::string& in, const zmq::DealerSocket& socket)
+{
+    const auto first = in.substr(0, in.find(" "));
+    if ("sendcheque" == first) {
+        send_cheque(in, socket);
+    } else if ("transfer" == first) {
+        transfer(in, socket);
+    }
+}
+
 void CLI::send_payment_response(const proto::RPCResponse& in)
 {
     print_basic_info(in);
@@ -1947,4 +2308,90 @@ void CLI::task_complete_push(const proto::RPCPush& in)
     LogOutput("   ID: ")(task.id()).Flush();
     LogOutput("   Result: ")(((task.result()) ? "success" : "failure")).Flush();
 }
+
+// Invokes RPCCOMMAND_SENDPAYMENT for transaction type RPCPAYMENTTYPE_TRANSFER
+// only.
+void CLI::transfer(const std::string& in, const zmq::DealerSocket& socket)
+{
+    int instance{-1};
+    std::string contactID{""};
+    std::string sourceAccountID{""};
+    std::string destinationAccountID{""};
+    std::string memo{""};
+    int amount{-1};
+
+    po::options_description options("Options");
+    options.add_options()("instance", po::value<int>(&instance), "<number>");
+    options.add_options()(
+        "contact", po::value<std::string>(&contactID), "<string>");
+    options.add_options()(
+        "sourceaccount", po::value<std::string>(&sourceAccountID), "<string>");
+    options.add_options()(
+        "destinationaccount",
+        po::value<std::string>(&destinationAccountID),
+        "<string>");
+    options.add_options()("memo", po::value<std::string>(&memo), "<string>");
+    options.add_options()("amount", po::value<int>(&amount), "<number>");
+    auto hasOptions = parse_command(in, options);
+
+    if (!hasOptions) {
+        print_options_description(options);
+        return;
+    }
+
+    if (0 > instance) {
+        LogOutput(__FUNCTION__)(": Missing instance option").Flush();
+
+        return;
+    }
+
+    if (contactID.empty()) {
+        LogOutput(__FUNCTION__)(": Missing contactid option").Flush();
+
+        return;
+    }
+
+    if (sourceAccountID.empty()) {
+        LogOutput(__FUNCTION__)(": Missing sourceaccountid option").Flush();
+
+        return;
+    }
+
+    if (destinationAccountID.empty()) {
+        LogOutput(__FUNCTION__)(": Missing destinationaccountid option")
+            .Flush();
+
+        return;
+    }
+
+    if (0 >= amount) {
+        LogOutput(__FUNCTION__)(": Missing amount option").Flush();
+
+        return;
+    }
+
+    proto::RPCCommand out{};
+    out.set_version(RPC_COMMAND_VERSION);
+    out.set_cookie(Identifier::Random()->str());
+    out.set_type(proto::RPCCOMMAND_SENDPAYMENT);
+    out.set_session(instance);
+
+    auto& sendpayment = *out.mutable_sendpayment();
+    sendpayment.set_version(SENDPAYMENT_VERSION);
+    sendpayment.set_type(proto::RPCPAYMENTTYPE_TRANSFER);
+    sendpayment.set_contact(contactID);
+    sendpayment.set_sourceaccount(sourceAccountID);
+    sendpayment.set_destinationaccount(destinationAccountID);
+    if (!memo.empty()) { sendpayment.set_memo(memo); }
+    sendpayment.set_amount(amount);
+
+    const auto valid = proto::Validate(out, VERBOSE);
+
+    OT_ASSERT(valid);
+
+    const auto sent = send_message(socket, out);
+
+    OT_ASSERT(sent);
+}
+
 }  // namespace opentxs::otctl

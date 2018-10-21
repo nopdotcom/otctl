@@ -41,13 +41,12 @@ private:
     static const std::map<proto::AccountEventType, std::string>
         account_push_names_;
 
-    //    const api::Native& ot_;
     const po::variables_map& options_;
     const std::string endpoint_;
     OTZMQListenCallback callback_;
     OTZMQDealerSocket socket_;
 
-    static void accept_pending_payments(
+    static void accept_pending_payment(
         const std::string& in,
         const network::zeromq::DealerSocket& socket);
     static void add_client_session(
@@ -80,10 +79,22 @@ private:
     static void get_compatible_accounts(
         const std::string& in,
         const network::zeromq::DealerSocket& socket);
+    static void get_nym(
+        const std::string& in,
+        const network::zeromq::DealerSocket& socket);
     static void get_pending_payments(
         const std::string& in,
         const network::zeromq::DealerSocket& socket);
+    static void get_seed(
+        const std::string& in,
+        const network::zeromq::DealerSocket& socket);
     static void get_server_contract(
+        const std::string& in,
+        const network::zeromq::DealerSocket& socket);
+    static void get_workflow(
+        const std::string& in,
+        const network::zeromq::DealerSocket& socket);
+    static void import_seed(
         const std::string& in,
         const network::zeromq::DealerSocket& socket);
     static void import_server_contract(
@@ -104,6 +115,9 @@ private:
     static void list_nyms(
         const std::string& in,
         const network::zeromq::DealerSocket& socket);
+    static void list_seeds(
+        const std::string& in,
+        const network::zeromq::DealerSocket& socket);
     static void list_server_contracts(
         const std::string& in,
         const network::zeromq::DealerSocket& socket);
@@ -119,11 +133,17 @@ private:
     static void register_nym(
         const std::string& in,
         const network::zeromq::DealerSocket& socket);
+    static void send_cheque(
+        const std::string& in,
+        const network::zeromq::DealerSocket& socket);
     static void send_payment(
         const std::string& in,
         const network::zeromq::DealerSocket& socket);
+    static void transfer(
+        const std::string& in,
+        const network::zeromq::DealerSocket& socket);
 
-    static void accept_pending_payments_response(const proto::RPCResponse& in);
+    static void accept_pending_payment_response(const proto::RPCResponse& in);
     static void add_contact_response(const proto::RPCResponse& in);
     static void add_session_response(const proto::RPCResponse& in);
     static void create_account_response(const proto::RPCResponse& in);
@@ -132,13 +152,18 @@ private:
     static void get_account_activity_response(const proto::RPCResponse& in);
     static void get_account_balance_response(const proto::RPCResponse& in);
     static void get_compatible_accounts_response(const proto::RPCResponse& in);
+    static void get_nym_response(const proto::RPCResponse& in);
     static void get_pending_payments_response(const proto::RPCResponse& in);
+    static void get_seed_response(const proto::RPCResponse& in);
     static void get_server_contract_response(const proto::RPCResponse& in);
+    static void get_workflow_response(const proto::RPCResponse& in);
+    static void import_seed_response(const proto::RPCResponse& in);
     static void import_server_contract_response(const proto::RPCResponse& in);
     static void issue_unit_definition_response(const proto::RPCResponse& in);
     static void list_accounts_response(const proto::RPCResponse& in);
     static void list_contacts_response(const proto::RPCResponse& in);
     static void list_nyms_response(const proto::RPCResponse& in);
+    static void list_seeds_response(const proto::RPCResponse& in);
     static void list_servers_response(const proto::RPCResponse& in);
     static void list_session_response(const proto::RPCResponse& in);
     static void list_unit_definitions_response(const proto::RPCResponse& in);
